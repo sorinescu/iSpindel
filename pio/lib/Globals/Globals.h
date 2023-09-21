@@ -62,15 +62,19 @@ extern Ticker flasher;
     Serial.println(__VA_ARGS__);                                                                                       \
   } while (0)
 
+#ifndef OW_PINS
+#error OW_PINS need to be defined in platformio.ini
+#endif
+#ifndef ACCEL_SCL_PIN
+#error ACCEL_SDA_PIN needs to be defined in platformio.ini
+#endif
+#ifndef ACCEL_SCL_PIN
+#error ACCEL_SDA_PIN needs to be defined in platformio.ini
+#endif
+
 #define PORTALTIMEOUT 300
 
 #define ADCDIVISOR 191.8
-#define ONE_WIRE_BUS D6 // DS18B20 on ESP pin12
-#define OW_PINS                                                                                                        \
-  (const uint8_t[])                                                                                                    \
-  {                                                                                                                    \
-    D1, D6                                                                                                             \
-  }
 #define RESOLUTION 12 // 12bit resolution == 750ms update rate
 #define OWinterval (760 / (1 << (12 - RESOLUTION)))
 #define CFGFILE "/config.json"

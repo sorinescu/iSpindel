@@ -881,9 +881,11 @@ void requestTemp()
 
 void initDS18B20()
 {
+  const uint8_t owPins[]{OW_PINS};
+
   if (myData.OWpin == -1)
   {
-    myData.OWpin = detectTempSensor(OW_PINS);
+    myData.OWpin = detectTempSensor(owPins);
     if (myData.OWpin == -1)
     {
       CONSOLELN(F("ERROR: cannot find a OneWire Temperature Sensor!"));
@@ -900,7 +902,7 @@ void initDS18B20()
   bool device = DS18B20.getAddress(tempDeviceAddress, 0);
   if (!device)
   {
-    myData.OWpin = detectTempSensor(OW_PINS);
+    myData.OWpin = detectTempSensor(owPins);
     if (myData.OWpin == -1)
     {
       CONSOLELN(F("ERROR: cannot find a OneWire Temperature Sensor!"));
@@ -929,7 +931,7 @@ bool isDS18B20ready()
 void initAccel()
 {
   // join I2C bus (I2Cdev library doesn't do this automatically)
-  Wire.begin(D3, D4);
+  Wire.begin(ACCEL_SDA_PIN, ACCEL_SCL_PIN);
   Wire.setClock(100000);
   Wire.setClockStretchLimit(2 * 230);
 
