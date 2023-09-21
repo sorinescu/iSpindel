@@ -65,12 +65,6 @@ extern Ticker flasher;
 #define PORTALTIMEOUT 300
 
 #define ADCDIVISOR 191.8
-#define ONE_WIRE_BUS D6 // DS18B20 on ESP pin12
-#define OW_PINS                                                                                                        \
-  (const uint8_t[])                                                                                                    \
-  {                                                                                                                    \
-    D1, D6                                                                                                             \
-  }
 #define RESOLUTION 12 // 12bit resolution == 750ms update rate
 #define OWinterval (760 / (1 << (12 - RESOLUTION)))
 #define CFGFILE "/config.json"
@@ -153,6 +147,8 @@ struct iData
   int16_t Offset[6];
   uint8_t tempscale = TEMP_CELSIUS;
   int8_t OWpin = -1;
+  int8_t AccelSDAPin = -1;
+  int8_t AccelSCLPin = -1;
 #if API_MQTT_HASSIO
   bool hassio = false;
 #endif

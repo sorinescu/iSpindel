@@ -37,7 +37,6 @@ Ticker flasher;
 RunningMedian samples = RunningMedian(MEDIANROUNDSMAX);
 DoubleResetDetector drd(DRD_TIMEOUT, DRD_ADDRESS);
 
-int detectTempSensor(const uint8_t pins[]);
 bool testAccel();
 
 bool shouldSaveConfig = false;
@@ -174,6 +173,10 @@ bool readConfig()
             myData.tempscale = doc["TS"];
           if (doc.containsKey("OWpin"))
             myData.OWpin = doc["OWpin"];
+          if (doc.containsKey("AccelSCLPin"))
+            myData.AccelSCLPin = doc["AccelSCLPin"];
+          if (doc.containsKey("AccelSDAPin"))
+            myData.AccelSDAPin = doc["AccelSDAPin"];
           if (doc.containsKey("SSID"))
             myData.ssid = (const char *)doc["SSID"];
           if (doc.containsKey("PSK"))
@@ -271,6 +274,16 @@ void validateInput(const char *input, char *output)
   tmp.toCharArray(output, tmp.length() + 1);
 }
 
+int8 validateInt8Input(const char *input, int8 defaultValue = -1)
+{
+  String tmp = input;
+  tmp.trim();
+  if (tmp == "") {
+    return defaultValue;
+  }
+  return tmp.toInt();
+}
+
 String htmlencode(String str)
 {
   String encodedstr = "";
@@ -312,7 +325,6 @@ void postConfig()
 
 bool startConfiguration()
 {
-
   WiFiManager wifiManager;
 
   wifiManager.setConfigPortalTimeout(PORTALTIMEOUT);
@@ -350,9 +362,24 @@ bool startConfiguration()
       "Thingname</LI><LI>Server must be Endpoint</LI><LI>Port must be 8883</LI><LI>Path/URI is Publish Topic</LI></UL>",
       "<<<<< >>>>>", TKIDSIZE);
 
+  WiFiManagerParameter custom_ow_pin("owpin", "Temperature sensor pin", myData.OWpin < 0 ? "" : String(myData.OWpin).c_str(), 2, TYPE_NUMBER);
+  WiFiManagerParameter custom_accel_sda_pin("accelsdapin", "Accelerometer SDA pin", myData.AccelSDAPin < 0 ? "" : String(myData.AccelSDAPin).c_str(), 2, TYPE_NUMBER);
+  WiFiManagerParameter custom_accel_scl_pin("accelsclpin", "Accelerometer SCL pin", myData.AccelSCLPin < 0 ? "" : String(myData.AccelSCLPin).c_str(), 2, TYPE_NUMBER);
+  WiFiManagerParameter custom_warning2(
+      "warning2",
+      "WARNING! Be careful when configuring these pins! If they are set incorrectly, <b>you can fry the circuit!</b>"
+      "<BR>See <a href=\"https://randomnerdtutorials.com/esp8266-pinout-reference-gpios/\">ESP8266 Pinout Reference</a> for your board."
+      "<BR>The pin number is the number of the GPIO (e.g. 4 for GPIO4).",
+      "<<<<< >>>>>", TKIDSIZE);
+
   wifiManager.addParameter(&custom_name);
   wifiManager.addParameter(&custom_sleep);
   wifiManager.addParameter(&custom_vfact);
+
+  wifiManager.addParameter(&custom_ow_pin);
+  wifiManager.addParameter(&custom_accel_sda_pin);
+  wifiManager.addParameter(&custom_accel_scl_pin);
+  wifiManager.addParameter(&custom_warning2);
 
   WiFiManagerParameter custom_tempscale_hint("<label for=\"TS\">Unit of temperature</label>");
   wifiManager.addParameter(&custom_tempscale_hint);
@@ -436,6 +463,18 @@ bool startConfiguration()
   if (myData.vfact < ADCDIVISOR * 0.8 || myData.vfact > ADCDIVISOR * 1.25)
     myData.vfact = ADCDIVISOR;
 
+  int8 owPin = validateInt8Input(custom_ow_pin.getValue());
+  int8 accelSCLPin = validateInt8Input(custom_accel_scl_pin.getValue());
+  int8 accelSDAPin = validateInt8Input(custom_accel_sda_pin.getValue());
+
+  bool shouldReboot = owPin != myData.OWpin || 
+    accelSCLPin != myData.AccelSCLPin || 
+    accelSDAPin != myData.AccelSDAPin;
+  
+  myData.OWpin = owPin;
+  myData.AccelSCLPin = accelSCLPin;
+  myData.AccelSDAPin = accelSDAPin;
+
   // save the custom parameters to FS
   if (shouldSaveConfig)
   {
@@ -445,8 +484,16 @@ bool startConfiguration()
 
     postConfig();
 
-    return saveConfig();
+    bool saved = saveConfig();
+    
+    if (shouldReboot) {
+      CONSOLE(F("\nRebooting because of changed pins"));
+      ESP.restart();
+    }
+
+    return saved;
   }
+
   return false;
 }
 
@@ -520,6 +567,8 @@ bool saveConfig()
   doc["Vfact"] = myData.vfact;
   doc["TS"] = myData.tempscale;
   doc["OWpin"] = myData.OWpin;
+  doc["AccelSCLPin"] = myData.AccelSCLPin;
+  doc["AccelSDAPin"] = myData.AccelSDAPin;
   doc["POLY"] = myData.polynominal;
   doc["SSID"] = WiFi.SSID();
   doc["PSK"] = WiFi.psk();
@@ -547,6 +596,7 @@ bool saveConfig()
     configFile.close();
     LittleFS.gc();
     LittleFS.end();
+    shouldSaveConfig = false; // mark it saved
     CONSOLELN(F("\nsaved successfully"));
     return true;
   }
@@ -883,12 +933,8 @@ void initDS18B20()
 {
   if (myData.OWpin == -1)
   {
-    myData.OWpin = detectTempSensor(OW_PINS);
-    if (myData.OWpin == -1)
-    {
-      CONSOLELN(F("ERROR: cannot find a OneWire Temperature Sensor!"));
-      return;
-    }
+    CONSOLELN(F("ERROR: OneWire Temperature Sensor pin not configured!"));
+    return;
   }
   pinMode(myData.OWpin, OUTPUT);
   digitalWrite(myData.OWpin, LOW);
@@ -900,20 +946,8 @@ void initDS18B20()
   bool device = DS18B20.getAddress(tempDeviceAddress, 0);
   if (!device)
   {
-    myData.OWpin = detectTempSensor(OW_PINS);
-    if (myData.OWpin == -1)
-    {
-      CONSOLELN(F("ERROR: cannot find a OneWire Temperature Sensor!"));
-      return;
-    }
-    else
-    {
-      delete oneWire;
-      oneWire = new OneWire(myData.OWpin);
-      DS18B20 = DallasTemperature(oneWire);
-      DS18B20.begin();
-      DS18B20.getAddress(tempDeviceAddress, 0);
-    }
+    CONSOLELN(F("ERROR: cannot find a OneWire Temperature Sensor!"));
+    return;
   }
 
   DS18B20.setWaitForConversion(false);
@@ -928,8 +962,16 @@ bool isDS18B20ready()
 
 void initAccel()
 {
+  // Must first define communication pins
+  if (myData.AccelSDAPin == -1 || myData.AccelSCLPin == -1)
+  {
+    CONSOLELN(F("ERROR: Accelerometer SCL/SDA pins not configured"));
+    return;
+  }
+
   // join I2C bus (I2Cdev library doesn't do this automatically)
-  Wire.begin(D3, D4);
+  // Wire.begin(D3, D4);
+  Wire.begin(myData.AccelSDAPin, myData.AccelSCLPin);
   Wire.setClock(100000);
   Wire.setClockStretchLimit(2 * 230);
 
@@ -1050,118 +1092,6 @@ float getTemperature(bool block = false)
   }
 
   return t;
-}
-
-int detectTempSensor(const uint8_t pins[])
-{
-
-  for (uint8_t p = 0; p < sizeof(pins); p++)
-  {
-    const byte pin = pins[p];
-    byte i;
-    byte present = 0;
-    byte type_s;
-    byte data[12];
-    byte addr[8];
-    float celsius;
-
-    CONSOLE(F("scanning for OW device on pin: "));
-    CONSOLELN(pin);
-    OneWire ds(pin);
-
-    if (!ds.search(addr))
-    {
-      CONSOLELN(F("No devices found!"));
-      ds.reset_search();
-      delay(250);
-      continue;
-    }
-
-    CONSOLE("Found device with ROM =");
-    for (i = 0; i < 8; i++)
-    {
-      CONSOLE(' ');
-      CONSOLE(addr[i], HEX);
-    }
-
-    if (OneWire::crc8(addr, 7) != addr[7])
-    {
-      CONSOLELN(" CRC is not valid!");
-      continue;
-    }
-    CONSOLELN();
-
-    // the first ROM byte indicates which chip
-    switch (addr[0])
-    {
-    case 0x10:
-      CONSOLELN("  Chip = DS18S20"); // or old DS1820
-      type_s = 1;
-      break;
-    case 0x28:
-      CONSOLELN("  Chip = DS18B20");
-      type_s = 0;
-      break;
-    case 0x22:
-      CONSOLELN("  Chip = DS1822");
-      type_s = 0;
-      break;
-    default:
-      CONSOLELN("Device is not a DS18x20 family device.");
-      continue;
-    }
-
-    ds.reset();
-    ds.select(addr);
-    ds.write(0x44, 1); // start conversion, with parasite power on at the end
-
-    delay(900); // maybe 750ms is enough, maybe not
-    present = ds.reset();
-    ds.select(addr);
-    ds.write(0xBE); // Read Scratchpad
-
-    CONSOLE("  Data = ");
-    CONSOLE(present, HEX);
-    CONSOLE(" ");
-    for (i = 0; i < 9; i++)
-    { // we need 9 bytes
-      data[i] = ds.read();
-      CONSOLE(data[i], HEX);
-      CONSOLE(" ");
-    }
-    CONSOLE(" CRC=");
-    CONSOLELN(OneWire::crc8(data, 8), HEX);
-
-    // Convert the data to actual temperature
-    int16_t raw = (data[1] << 8) | data[0];
-    if (type_s)
-    {
-      raw = raw << 3; // 9 bit resolution default
-      if (data[7] == 0x10)
-      {
-        // "count remain" gives full 12 bit resolution
-        raw = (raw & 0xFFF0) + 12 - data[6];
-      }
-    }
-    else
-    {
-      byte cfg = (data[4] & 0x60);
-      // at lower res, the low bits are undefined, so let's zero them
-      if (cfg == 0x00)
-        raw = raw & ~7; // 9 bit resolution, 93.75 ms
-      else if (cfg == 0x20)
-        raw = raw & ~3; // 10 bit res, 187.5 ms
-      else if (cfg == 0x40)
-        raw = raw & ~1; // 11 bit res, 375 ms
-      //// default is 12 bit resolution, 750 ms conversion time
-    }
-    celsius = (float)raw / 16.0;
-    CONSOLE(F("  Temperature = "));
-    CONSOLE(celsius);
-    CONSOLELN(F(" Celsius, "));
-    return pin;
-  }
-  return -1;
 }
 
 float getBattery()
