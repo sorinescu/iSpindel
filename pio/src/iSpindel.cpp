@@ -433,7 +433,7 @@ bool startConfiguration()
   tmp.trim();
   tmp.replace(',', '.');
   myData.vfact = tmp.toFloat();
-  if (myData.vfact < ADCDIVISOR * 0.8 || myData.vfact > ADCDIVISOR * 1.25)
+  if (myData.vfact < ADCDIVISOR * 0.6 || myData.vfact > ADCDIVISOR * 1.4)
     myData.vfact = ADCDIVISOR;
 
   // save the custom parameters to FS
